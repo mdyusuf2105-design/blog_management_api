@@ -38,11 +38,18 @@ class PostResponse(BaseModel):
     content: str
     author_id: int
     created_at: datetime
+    image: str | None = None
 
     class Config:
         from_attributes = True
 
-
+class PaginatedPostResponse(BaseModel):
+    posts: list[PostResponse]
+    total_count: int
+    total_pages: int
+    page: int
+    limit: int
+    
 class PostUpdate(BaseModel):
     title: str
     content: str
@@ -60,3 +67,4 @@ class CommentResponse(BaseModel):
 
     class Config:
         from_attributes = True
+

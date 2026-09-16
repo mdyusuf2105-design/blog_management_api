@@ -1,4 +1,6 @@
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from database import engine, Base
 import models
@@ -14,6 +16,16 @@ app = FastAPI(
     description="Mini blogging system using FastAPI, SQLite and SQLAlchemy",
     version="1.0.0"
 )
+
+
+MEDIA_POSTS_DIR = Path("media/posts").resolve()
+
+app.mount(
+    "/media/posts",
+    StaticFiles(directory=str(MEDIA_POSTS_DIR)),
+    name="media"
+)
+
 
 
 app.include_router(auth.router)
