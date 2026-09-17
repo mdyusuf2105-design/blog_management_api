@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from database import engine, Base
 import models
 
-from routers import auth, posts, comments, likes
+from routers import auth, posts, comments, likes, subscription
 
 
 Base.metadata.create_all(bind=engine)
@@ -26,13 +26,20 @@ app.mount(
     name="media"
 )
 
+MEDIA_INVOICES_DIR = Path("media/invoices").resolve()
+MEDIA_INVOICES_DIR.mkdir(parents=True, exist_ok=True)
 
+app.mount(
+    "/media/invoices",
+    StaticFiles(directory=str(MEDIA_INVOICES_DIR)),
+    name="invoices"
+)
 
 app.include_router(auth.router)
 app.include_router(posts.router)
 app.include_router(comments.router)
 app.include_router(likes.router)
-
+app.include_router(subscription.router)
 
 @app.get("/")
 def home():

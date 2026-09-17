@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -12,6 +12,24 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
+    subscription_plan_id = Column(
+        Integer,
+        ForeignKey("subscription_plans.id"),
+        nullable=True
+    )
+
+    subscription_start = Column(DateTime(timezone=True), nullable=True)
+    subscription_end = Column(DateTime(timezone=True), nullable=True)
+
+    subscription_plan = relationship(
+    "SubscriptionPlan",
+    back_populates="users"
+)
+
+    billing_history = relationship(
+        "BillingHistory",
+        back_populates="user"
+    )
 
     posts = relationship("Post", back_populates="author")
     comments = relationship("Comment", back_populates="user")
@@ -31,7 +49,11 @@ class Post(Base):
     author = relationship("User", back_populates="posts")
     comments = relationship("Comment", back_populates="post")
     likes = relationship("Like", back_populates="post")
-
+    images = relationship(
+        "PostImage",
+        back_populates="post",
+        cascade="all, delete-orphan"
+    )
 
 class Comment(Base):
     __tablename__ = "comments"
@@ -55,3 +77,73 @@ class Like(Base):
 
     post = relationship("Post", back_populates="likes")
     user = relationship("User", back_populates="likes")
+
+class SubscriptionPlan(Base):
+    __tablename__ = "subscription_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    price = Column(Integer, nullable=False)
+
+    post_limit = Column(Integer, nullable=True)
+    images_per_post = Column(Integer, nullable=True)
+    like_limit = Column(Integer, nullable=True)
+    comment_limit = Column(Integer, nullable=True)
+
+    users = relationship(
+        "User",
+        back_populates="subscription_plan"
+    )
+
+
+class BillingHistory(Base):
+    __tablename__ = "billing_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
+
+    plan_id = Column(
+        Integer,
+        ForeignKey("subscription_plans.id"),
+        nullable=False
+    )
+
+    price = Column(Integer, nullable=False)
+    transaction_id = Column(String, unique=True, nullable=False)
+    invoice_path = Column(String, nullable=True)
+
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now()
+    )
+
+    user = relationship(
+        "User",
+        back_populates="billing_history"
+    )
+
+    plan = relationship("SubscriptionPlan")
+
+class PostImage(Base):
+    __tablename__ = "post_images"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(
+        Integer,
+        ForeignKey("posts.id"),
+        nullable=False
+    )
+    image_path = Column(String, nullable=False)
+
+    post = relationship(
+        "Post",
+        back_populates="images"
+    )

@@ -31,6 +31,12 @@ class PostCreate(BaseModel):
     title: str
     content: str
 
+class PostImageResponse(BaseModel):
+    id: int
+    image_path: str
+
+    class Config:
+        from_attributes = True
 
 class PostResponse(BaseModel):
     id: int
@@ -39,6 +45,7 @@ class PostResponse(BaseModel):
     author_id: int
     created_at: datetime
     image: str | None = None
+    images: list[PostImageResponse] = []
 
     class Config:
         from_attributes = True

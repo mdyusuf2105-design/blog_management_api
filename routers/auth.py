@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User
+from models import User, SubscriptionPlan
 from schemas import UserCreate, UserResponse, Token
 from auth import hash_password, verify_password, create_access_token
 
@@ -39,12 +39,24 @@ def register(
             detail="Email already registered"
         )
 
+    basic_plan = db.query(SubscriptionPlan).filter(
+        SubscriptionPlan.name == "Basic"
+    ).first()
+
+    if not basic_plan:
+        raise HTTPException(
+            status_code=500,
+            detail="Basic subscription plan not found"
+        )  
     hashed_password = hash_password(user.password)
 
     new_user = User(
         username=user.username,
         email=user.email,
-        password=hashed_password
+        password=hashed_password,
+        subscription_plan_id=basic_plan.id,
+        subscription_start=None,
+        subscription_end=None
     )
 
     db.add(new_user)
