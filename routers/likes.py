@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Like, Post, User, SubscriptionPlan
 from auth import get_current_user
-from email_utils import send_email
 from routers.posts import check_active_subscription
+from services.notification_service import send_post_notification
 
 
 router = APIRouter(
@@ -26,7 +26,6 @@ def like_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Check whether the post exists
     post = db.query(Post).filter(
         Post.id == post_id
     ).first()
@@ -37,10 +36,8 @@ def like_post(
             detail="Post not found",
         )
 
-    # Check whether the user's subscription is active
     check_active_subscription(current_user)
 
-    # Check whether the user already liked this post
     existing_like = db.query(Like).filter(
         Like.post_id == post_id,
         Like.user_id == current_user.id,
@@ -52,7 +49,6 @@ def like_post(
             detail="You already liked this post",
         )
 
-    # Get the user's subscription plan
     plan = db.query(SubscriptionPlan).filter(
         SubscriptionPlan.id == current_user.subscription_plan_id
     ).first()
@@ -63,7 +59,6 @@ def like_post(
             detail="No active subscription plan found",
         )
 
-    # Check the like limit
     if plan.like_limit is not None:
         like_count = db.query(Like).filter(
             Like.user_id == current_user.id
@@ -75,7 +70,6 @@ def like_post(
                 detail=PLAN_LIMIT_MESSAGE,
             )
 
-    # Create the like
     new_like = Like(
         post_id=post_id,
         user_id=current_user.id,
@@ -84,13 +78,15 @@ def like_post(
     db.add(new_like)
     db.commit()
 
-    # Send notification email
-    background_tasks.add_task(
-        send_email,
-        post.author.email,
-        "Someone liked your blog post",
-        f"Someone liked your post '{post.title}'.",
-    )
+    # Notify the post owner, but not when liking your own post.
+    if post.author_id != current_user.id and post.author.email:
+        background_tasks.add_task(
+            send_post_notification,
+            recipient_email=post.author.email,
+            post_title=post.title,
+            actor_name=current_user.username,
+            activity="Liked your post",
+        )
 
     return {
         "message": "Post liked successfully"
