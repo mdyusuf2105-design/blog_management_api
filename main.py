@@ -6,7 +6,7 @@ from database import engine, Base
 import models
 
 from routers import auth, posts, comments, likes, subscription
-
+from routers import dashboard
 
 Base.metadata.create_all(bind=engine)
 
@@ -16,7 +16,15 @@ app = FastAPI(
     description="Mini blogging system using FastAPI, SQLite and SQLAlchemy",
     version="1.0.0"
 )
+from fastapi.middleware.cors import CORSMiddleware
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 MEDIA_POSTS_DIR = Path("media/posts").resolve()
 
@@ -40,6 +48,7 @@ app.include_router(posts.router)
 app.include_router(comments.router)
 app.include_router(likes.router)
 app.include_router(subscription.router)
+app.include_router(dashboard.router)
 
 @app.get("/")
 def home():
