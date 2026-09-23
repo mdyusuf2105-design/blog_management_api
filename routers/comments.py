@@ -8,7 +8,9 @@ from schemas import CommentCreate, CommentResponse
 from auth import get_current_user
 from routers.posts import check_active_subscription
 from services.notification_service import send_post_notification
-
+from services.in_app_notification_service import (
+    create_in_app_notification
+)
 
 router = APIRouter(
     prefix="/posts",
@@ -74,6 +76,15 @@ def add_comment(
     db.commit()
     db.refresh(new_comment)
 
+    # Create an in-app notification for the post owner
+    if post.author_id != current_user.id:
+        create_in_app_notification(
+            db=db,
+            user_id=post.author_id,
+            message=f"{current_user.username} commented on your post: {post.title}",
+            notification_type="comment",
+        )
+        
     # Notify the post owner, but don't notify users about their own comments.
     if post.author_id != current_user.id and post.author.email:
         background_tasks.add_task(

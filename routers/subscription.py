@@ -9,11 +9,16 @@ from database import get_db
 from models import SubscriptionPlan, BillingHistory, User
 from auth import get_current_user
 from invoice_utils import generate_invoice
+from services.in_app_notification_service import (
+    create_in_app_notification
+)
 
 router = APIRouter(
     prefix="/subscriptions",
     tags=["Subscriptions"]
 )
+
+
 def has_active_subscription(user: User) -> bool:
     if not user.subscription_end:
         return False
@@ -24,6 +29,7 @@ def has_active_subscription(user: User) -> bool:
         end_date = end_date.date()
 
     return end_date >= date.today()
+
 
 @router.get("/plans")
 def get_plans(db: Session = Depends(get_db)):
@@ -45,7 +51,9 @@ def upgrade_subscription(
             status_code=404,
             detail="Subscription plan not found"
         )
-    
+
+    # Check whether the user already has an active subscription.
+    is_renewal = has_active_subscription(current_user)
 
     start_date = date.today()
     end_date = start_date + timedelta(days=30)
@@ -62,7 +70,6 @@ def upgrade_subscription(
         start_date=start_date,
         end_date=end_date
     )
-
 
     db.add(billing)
     db.commit()
@@ -84,6 +91,23 @@ def upgrade_subscription(
     db.refresh(current_user)
     db.refresh(billing)
 
+    # Create an in-app notification after the subscription is updated.
+    notification_message = (
+        f"Your subscription to {plan.name} "
+        f"{'has been renewed' if is_renewal else 'has been activated'}."
+    )
+
+    create_in_app_notification(
+        db=db,
+        user_id=current_user.id,
+        message=notification_message,
+        notification_type=(
+            "subscription_renewal"
+            if is_renewal
+            else "subscription"
+        )
+    )
+
     return {
         "message": "Subscription updated successfully",
         "plan": plan.name,
@@ -104,6 +128,7 @@ def get_billing_history(
     ).order_by(BillingHistory.id.desc()).all()
 
     return history
+
 
 @router.get("/my-subscription")
 def get_my_subscription(

@@ -7,6 +7,9 @@ from models import Like, Post, User, SubscriptionPlan
 from auth import get_current_user
 from routers.posts import check_active_subscription
 from services.notification_service import send_post_notification
+from services.in_app_notification_service import (
+    create_in_app_notification
+)
 
 
 router = APIRouter(
@@ -78,7 +81,20 @@ def like_post(
     db.add(new_like)
     db.commit()
 
-    # Notify the post owner, but not when liking your own post.
+    # Create an in-app notification for the post owner.
+    # Do not notify users about their own likes.
+    if post.author_id != current_user.id:
+        create_in_app_notification(
+            db=db,
+            user_id=post.author_id,
+            message=(
+                f"{current_user.username} liked your post: "
+                f"{post.title}"
+            ),
+            notification_type="like",
+        )
+
+    # Keep the existing email notification.
     if post.author_id != current_user.id and post.author.email:
         background_tasks.add_task(
             send_post_notification,

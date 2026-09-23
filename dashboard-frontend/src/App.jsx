@@ -21,13 +21,26 @@ ChartJS.register(
   Legend
 );
 
-const API_URL = "http://127.0.0.1:8000/user/dashboard/";
+const API_URL = "http://127.0.0.1:8000";
+const DASHBOARD_URL = `${API_URL}/user/dashboard/`;
+const NOTIFICATIONS_URL = `${API_URL}/notifications/`;
 
 function App() {
   const [token, setToken] = useState("");
   const [dashboard, setDashboard] = useState(null);
+  const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [notificationLoading, setNotificationLoading] =
+    useState(false);
   const [error, setError] = useState("");
+  const [notificationError, setNotificationError] =
+    useState("");
+  const [showNotifications, setShowNotifications] =
+    useState(false);
+
+  const unreadCount = notifications.filter(
+    (notification) => !notification.is_read
+  ).length;
 
   async function loadDashboard() {
     if (!token.trim()) {
@@ -39,7 +52,7 @@ function App() {
     setError("");
 
     try {
-      const response = await fetch(API_URL, {
+      const response = await fetch(DASHBOARD_URL, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token.trim()}`,
@@ -56,6 +69,7 @@ function App() {
       }
 
       setDashboard(data);
+      await loadNotifications();
     } catch (err) {
       setError(
         err.message ||
@@ -64,6 +78,138 @@ function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function loadNotifications() {
+    if (!token.trim()) {
+      setNotificationError(
+        "Please enter your JWT access token first."
+      );
+      return;
+    }
+
+    setNotificationLoading(true);
+    setNotificationError("");
+
+    try {
+      const response = await fetch(NOTIFICATIONS_URL, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token.trim()}`,
+          Accept: "application/json",
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || "Unable to load notifications."
+        );
+      }
+
+      setNotifications(data);
+    } catch (err) {
+      setNotificationError(
+        err.message || "Could not load notifications."
+      );
+    } finally {
+      setNotificationLoading(false);
+    }
+  }
+
+  async function markAsRead(notificationId) {
+    setNotificationError("");
+
+    try {
+      const response = await fetch(
+        `${NOTIFICATIONS_URL}${notificationId}/read`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token.trim()}`,
+            Accept: "application/json",
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || "Unable to mark as read."
+        );
+      }
+
+      setNotifications((previous) =>
+        previous.map((notification) =>
+          notification.id === notificationId
+            ? { ...notification, is_read: true }
+            : notification
+        )
+      );
+    } catch (err) {
+      setNotificationError(
+        err.message || "Unable to update notification."
+      );
+    }
+  }
+
+  async function markAllAsRead() {
+    setNotificationError("");
+
+    try {
+      const response = await fetch(
+        `${NOTIFICATIONS_URL}read-all`,
+        {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${token.trim()}`,
+            Accept: "application/json",
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || "Unable to mark all as read."
+        );
+      }
+
+      setNotifications((previous) =>
+        previous.map((notification) => ({
+          ...notification,
+          is_read: true,
+        }))
+      );
+    } catch (err) {
+      setNotificationError(
+        err.message || "Unable to update notifications."
+      );
+    }
+  }
+
+  function formatTimestamp(timestamp) {
+    if (!timestamp) return "";
+
+    const date = new Date(timestamp);
+
+    if (Number.isNaN(date.getTime())) {
+      return timestamp;
+    }
+
+    return date.toLocaleString();
+  }
+
+  function getNotificationIcon(type) {
+    if (type === "like") return "♥";
+    if (type === "comment") return "💬";
+    if (type === "subscription_renewal") return "↻";
+    if (type === "subscription") return "★";
+
+    return "●";
   }
 
   // Overall statistics chart
@@ -188,8 +334,140 @@ function App() {
           </p>
         </div>
 
-        <div className="user-badge">
-          <span>●</span> Personal Analytics
+        <div className="header-actions">
+          <div className="notification-wrapper">
+            <button
+              className="notification-bell"
+              onClick={() => {
+                setShowNotifications((previous) => !previous);
+
+                if (!showNotifications) {
+                  loadNotifications();
+                }
+              }}
+              aria-label="Toggle notifications"
+              aria-expanded={showNotifications}
+            >
+              <span className="bell-icon">♧</span>
+              <span className="bell-emoji">🔔</span>
+
+              {unreadCount > 0 && (
+                <span className="notification-count">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <section className="notification-dropdown">
+                <div className="notification-header">
+                  <div>
+                    <h2>Notifications</h2>
+                    <p>
+                      {unreadCount} unread notification
+                      {unreadCount !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+
+                  <button
+                    className="close-notifications"
+                    onClick={() =>
+                      setShowNotifications(false)
+                    }
+                    aria-label="Close notifications"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <div className="notification-actions">
+                  <button
+                    onClick={loadNotifications}
+                    disabled={notificationLoading}
+                  >
+                    {notificationLoading
+                      ? "Refreshing..."
+                      : "Refresh"}
+                  </button>
+
+                  <button
+                    onClick={markAllAsRead}
+                    disabled={unreadCount === 0}
+                  >
+                    Mark all as read
+                  </button>
+                </div>
+
+                {notificationError && (
+                  <p
+                    className="notification-error"
+                    role="alert"
+                  >
+                    {notificationError}
+                  </p>
+                )}
+
+                {notificationLoading &&
+                notifications.length === 0 ? (
+                  <p className="notification-empty">
+                    Loading notifications...
+                  </p>
+                ) : notifications.length === 0 ? (
+                  <p className="notification-empty">
+                    You’re all caught up! No notifications yet.
+                  </p>
+                ) : (
+                  <div className="notification-list">
+                    {notifications.map((notification) => (
+                      <article
+                        key={notification.id}
+                        className={`notification-item ${
+                          notification.is_read
+                            ? "read"
+                            : "unread"
+                        }`}
+                      >
+                        <div className="notification-icon">
+                          {getNotificationIcon(
+                            notification.notification_type
+                          )}
+                        </div>
+
+                        <div className="notification-content">
+                          <p>{notification.message}</p>
+
+                          <span className="notification-time">
+                            {formatTimestamp(
+                              notification.timestamp
+                            )}
+                          </span>
+
+                          {!notification.is_read && (
+                            <button
+                              className="mark-read-button"
+                              onClick={() =>
+                                markAsRead(notification.id)
+                              }
+                            >
+                              Mark as read
+                            </button>
+                          )}
+                        </div>
+
+                        {!notification.is_read && (
+                          <span className="unread-dot" />
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+
+          <div className="user-badge">
+            <span>●</span> Personal Analytics
+          </div>
         </div>
       </header>
 
@@ -217,7 +495,8 @@ function App() {
 
         <p className="helper-text">
           Use your own access token. It is only used to
-          request your authenticated dashboard.
+          request your authenticated dashboard and
+          notifications.
         </p>
       </section>
 
@@ -273,7 +552,6 @@ function App() {
             </article>
           </section>
 
-          {/* Overall activity chart */}
           <section className="chart-panel">
             <div className="chart-heading">
               <div>
@@ -294,7 +572,6 @@ function App() {
             </div>
           </section>
 
-          {/* Per-post engagement chart */}
           <section className="chart-panel">
             <div className="chart-heading">
               <div>
