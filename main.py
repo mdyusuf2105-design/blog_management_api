@@ -8,6 +8,7 @@ import models
 from routers import auth, posts, comments, likes, subscription
 from routers import dashboard
 from routers import notifications
+from routers import ai_support
 
 Base.metadata.create_all(bind=engine)
 
@@ -51,6 +52,7 @@ app.include_router(likes.router)
 app.include_router(subscription.router)
 app.include_router(dashboard.router)
 app.include_router(notifications.router)
+app.include_router(ai_support.router)
 
 @app.get("/")
 def home():

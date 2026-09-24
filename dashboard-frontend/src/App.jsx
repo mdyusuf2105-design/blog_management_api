@@ -37,11 +37,77 @@ function App() {
     useState("");
   const [showNotifications, setShowNotifications] =
     useState(false);
-
+  const [showAIChat, setShowAIChat] = useState(false);
+  const [aiMessage, setAiMessage] = useState("");
+  const [aiMessages, setAiMessages] = useState([
+    {
+      sender: "ai",
+      text: "Hello! 👋 I'm your Blog Management Support Assistant. How can I help you?"
+    }
+  ]);
+  const [aiLoading, setAiLoading] = useState(false);
   const unreadCount = notifications.filter(
     (notification) => !notification.is_read
   ).length;
+  async function sendAIMessage() {
+    if (!aiMessage.trim() || !token.trim()) {
+      return;
+    }
 
+    const userMessage = aiMessage.trim();
+
+    setAiMessages((previous) => [
+      ...previous,
+      {
+        sender: "user",
+        text: userMessage
+      }
+    ]);
+
+    setAiMessage("");
+    setAiLoading(true);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/ai-support/?message=${encodeURIComponent(
+          userMessage
+        )}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token.trim()}`,
+            Accept: "application/json"
+          }
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || "Unable to contact AI Support."
+        );
+      }
+
+      setAiMessages((previous) => [
+        ...previous,
+        {
+          sender: "ai",
+          text: data.response
+        }
+      ]);
+    } catch (error) {
+      setAiMessages((previous) => [
+        ...previous,
+        {
+          sender: "ai",
+          text: "Sorry, I couldn't process your request right now."
+        }
+      ]);
+    } finally {
+      setAiLoading(false);
+    }
+  }
   async function loadDashboard() {
     if (!token.trim()) {
       setError("Please enter your JWT access token.");
@@ -605,6 +671,80 @@ function App() {
           </footer>
         </>
       )}
+      {/* AI Support Chat */}
+      <div className="ai-support-container">
+
+        {showAIChat && (
+          <div className="ai-chat-window">
+
+            <div className="ai-chat-header">
+              <div>
+                <strong>AI Support</strong>
+                <span>Online</span>
+              </div>
+
+              <button
+                onClick={() => setShowAIChat(false)}
+                className="ai-close-button"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="ai-chat-messages">
+              {aiMessages.map((message, index) => (
+                <div
+                  key={index}
+                  className={`ai-message ${
+                    message.sender === "user"
+                      ? "ai-user-message"
+                      : "ai-bot-message"
+                  }`}
+                >
+                  {message.text}
+                </div>
+              ))}
+
+              {aiLoading && (
+                <div className="ai-message ai-bot-message">
+                  Typing...
+                </div>
+              )}
+            </div>
+
+            <div className="ai-chat-input-area">
+              <input
+                type="text"
+                placeholder="Ask something..."
+                value={aiMessage}
+                onChange={(event) =>
+                  setAiMessage(event.target.value)
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    sendAIMessage();
+                  }
+                }}
+              />
+
+              <button onClick={sendAIMessage}>
+                ➤
+              </button>
+            </div>
+          </div>
+        )}
+            
+
+        <button
+          className="ai-support-button"
+          onClick={() =>
+            setShowAIChat((previous) => !previous)
+          }
+        >
+          💬
+        </button>
+
+      </div>
     </main>
   );
 }
