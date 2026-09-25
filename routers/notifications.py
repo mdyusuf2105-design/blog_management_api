@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Notification, User
-from auth import get_current_user
+from auth0 import get_auth0_user
 
 router = APIRouter(
     prefix="/notifications",
@@ -15,7 +15,7 @@ router = APIRouter(
 @router.get("/")
 def get_notifications(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_auth0_user)
 ):
     notifications = (
         db.query(Notification)
@@ -40,7 +40,7 @@ def get_notifications(
 def mark_notification_read(
     notification_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_auth0_user)
 ):
     notification = (
         db.query(Notification)
@@ -69,7 +69,7 @@ def mark_notification_read(
 @router.patch("/read-all")
 def mark_all_notifications_read(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_auth0_user)
 ):
     db.query(Notification).filter(
         Notification.user_id == current_user.id,

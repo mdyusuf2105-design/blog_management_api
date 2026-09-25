@@ -186,3 +186,18 @@ class Notification(Base):
         "User",
         back_populates="notifications"
     )
+
+class AISupportActivity(Base):
+    __tablename__ = "ai_support_activities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    question = Column(String, nullable=False)
+    ai_response = Column(String, nullable=False)
+    timestamp = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False
+    )
+
+    user = relationship("User")

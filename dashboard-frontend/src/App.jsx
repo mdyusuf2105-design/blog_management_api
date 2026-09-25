@@ -1,5 +1,6 @@
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 import { Bar } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -26,6 +27,23 @@ const DASHBOARD_URL = `${API_URL}/user/dashboard/`;
 const NOTIFICATIONS_URL = `${API_URL}/notifications/`;
 
 function App() {
+  const {
+    loginWithRedirect,
+    getAccessTokenSilently,
+    isAuthenticated,
+    user,
+    logout,
+    isLoading,
+    error: auth0Error
+  } = useAuth0();
+
+  console.log("AUTH0 STATUS:", {
+    isLoading,
+    isAuthenticated,
+    user,
+    auth0Error
+  });
+
   const [token, setToken] = useState("");
   const [dashboard, setDashboard] = useState(null);
   const [notifications, setNotifications] = useState([]);
@@ -46,11 +64,227 @@ function App() {
     }
   ]);
   const [aiLoading, setAiLoading] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const [authName, setAuthName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authSuccess, setAuthSuccess] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Automatically load the dashboard after a successful Auth0 login.
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadAuth0Session() {
+      try {
+        setError("");
+
+        const accessToken = await getAccessTokenSilently({
+          authorizationParams: {
+            audience: "http://127.0.0.1:8000",
+          },
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setToken(accessToken);
+        await loadDashboardWithToken(accessToken);
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err.message ||
+              "Auth0 login succeeded, but the dashboard could not be loaded."
+          );
+        }
+      }
+    }
+
+    loadAuth0Session();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, isLoading, getAccessTokenSilently]);
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: "18px"
+        }}
+      >
+        Loading authentication...
+      </div>
+    );
+  }
   const unreadCount = notifications.filter(
     (notification) => !notification.is_read
   ).length;
+
+  if (auth0Error) {
+    console.error("Auth0 error:", auth0Error);
+  }
+  async function handleNormalAuth() {
+    setAuthError("");
+    setAuthSuccess("");
+
+    if (!authEmail.trim() || !authPassword.trim()) {
+      setAuthError("Please enter your email and password.");
+      return;
+    }
+
+    if (authMode === "signup" && !authName.trim()) {
+      setAuthError("Please enter your name.");
+      return;
+    }
+
+    setAuthLoading(true);
+
+    try {
+      if (authMode === "signup") {
+        const response = await fetch(`${API_URL}/auth/register`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            username: authName.trim(),
+            email: authEmail.trim(),
+            password: authPassword
+          }),
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          const detail = Array.isArray(data.detail)
+            ? data.detail
+                .map((item) => item.msg || "Invalid input")
+                .join(", ")
+            : data.detail;
+
+          throw new Error(detail || "Signup failed.");
+        }
+
+        setAuthSuccess("Signup successful. Please login.");
+        setAuthMode("login");
+        setAuthPassword("");
+      } else {
+        const loginBody = new URLSearchParams();
+        loginBody.append("username", authEmail.trim());
+        loginBody.append("password", authPassword);
+
+        const response = await fetch(`${API_URL}/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+          body: loginBody.toString(),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          const detail = Array.isArray(data.detail)
+            ? data.detail
+                .map((item) => item.msg || "Invalid input")
+                .join(", ")
+            : data.detail;
+
+          throw new Error(detail || "Login failed.");
+        }
+
+        if (!data.access_token) {
+          throw new Error("Login succeeded but no access token was returned.");
+        }
+
+        setToken(data.access_token);
+        setAuthSuccess("Login successful.");
+        setAuthPassword("");
+
+        await loadDashboardWithToken(data.access_token);
+      }
+    } catch (err) {
+      setAuthError(err.message || "Authentication failed.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+async function loadDashboardWithToken(accessToken) {
+  setLoading(true);
+  setError("");
+
+  try {
+    const response = await fetch(DASHBOARD_URL, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Unable to load dashboard.");
+    }
+
+    setDashboard(data);
+    setToken(accessToken);
+    await loadNotifications(accessToken);
+  } catch (err) {
+    setError(err.message || "Could not load dashboard.");
+  } finally {
+    setLoading(false);
+  }
+}
   async function sendAIMessage() {
-    if (!aiMessage.trim() || !token.trim()) {
+    if (!aiMessage.trim()) {
+      return;
+    }
+
+    let accessToken = token;
+
+    if (!accessToken && isAuthenticated) {
+      try {
+        accessToken = await getAccessTokenSilently({
+          authorizationParams: {
+            audience: "http://127.0.0.1:8000",
+          },
+        });
+        setToken(accessToken);
+      } catch (err) {
+        setAiMessages((previous) => [
+          ...previous,
+          {
+            sender: "ai",
+            text: "Please login again before using AI Support.",
+          },
+        ]);
+        return;
+      }
+    }
+
+    if (!accessToken) {
+      setAiMessages((previous) => [
+        ...previous,
+        {
+          sender: "ai",
+          text: "Please login first to use AI Support.",
+        },
+      ]);
       return;
     }
 
@@ -75,7 +309,7 @@ function App() {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${token.trim()}`,
+            Authorization: `Bearer ${accessToken}`,
             Accept: "application/json"
           }
         }
@@ -108,60 +342,31 @@ function App() {
       setAiLoading(false);
     }
   }
-  async function loadDashboard() {
-    if (!token.trim()) {
-      setError("Please enter your JWT access token.");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await fetch(DASHBOARD_URL, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token.trim()}`,
-          Accept: "application/json",
-        },
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail || "Unable to load dashboard."
-        );
-      }
-
-      setDashboard(data);
-      await loadNotifications();
-    } catch (err) {
-      setError(
-        err.message ||
-          "Could not connect to the FastAPI server."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadNotifications() {
-    if (!token.trim()) {
-      setNotificationError(
-        "Please enter your JWT access token first."
-      );
-      return;
-    }
-
+  async function loadNotifications(providedToken = "") {
     setNotificationLoading(true);
     setNotificationError("");
 
     try {
+      let accessToken = providedToken || token;
+
+      if (!accessToken && isAuthenticated) {
+        accessToken = await getAccessTokenSilently({
+          authorizationParams: {
+            audience: "http://127.0.0.1:8000",
+          },
+        });
+      }
+
+      if (!accessToken) {
+        throw new Error("Please login first.");
+      }
+
+      setToken(accessToken);
+
       const response = await fetch(NOTIFICATIONS_URL, {
         method: "GET",
         headers: {
-          Authorization: `Bearer ${token.trim()}`,
+          Authorization: `Bearer ${accessToken}`,
           Accept: "application/json",
         },
       });
@@ -399,7 +604,169 @@ function App() {
             Your personal blog activity at a glance.
           </p>
         </div>
+        <div className="auth0-login-section">
+          {!isAuthenticated ? (
+            <>
+              <p className="auth0-login-title">
+                {dashboard
+                  ? "Logged in with Email"
+                  : "Login with your account"}
+              </p>
 
+              {!dashboard && (
+                <div className="normal-auth-section">
+                  <p className="auth0-login-title">
+                    {authMode === "login"
+                      ? "Login with Email"
+                      : "Create Account"}
+                  </p>
+
+                  {authMode === "signup" && (
+                    <input
+                      type="text"
+                      placeholder="Name"
+                      value={authName}
+                      onChange={(event) =>
+                        setAuthName(event.target.value)
+                      }
+                    />
+                  )}
+
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    value={authEmail}
+                    onChange={(event) =>
+                      setAuthEmail(event.target.value)
+                    }
+                  />
+
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={authPassword}
+                    onChange={(event) =>
+                      setAuthPassword(event.target.value)
+                    }
+                  />
+
+                  <button
+                    onClick={handleNormalAuth}
+                    disabled={authLoading}
+                  >
+                    {authLoading
+                      ? "Please wait..."
+                      : authMode === "login"
+                        ? "Login"
+                        : "Sign Up"}
+                  </button>
+
+                  {authError && (
+                    <p
+                      style={{
+                        color: "#dc2626",
+                        margin: "8px 0",
+                      }}
+                    >
+                      {authError}
+                    </p>
+                  )}
+
+                  {authSuccess && (
+                    <p
+                      style={{
+                        color: "#16a34a",
+                        margin: "8px 0",
+                      }}
+                    >
+                      {authSuccess}
+                    </p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode(
+                        authMode === "login"
+                          ? "signup"
+                          : "login"
+                      );
+                      setAuthError("");
+                      setAuthSuccess("");
+                    }}
+                  >
+                    {authMode === "login"
+                      ? "Create a new account"
+                      : "Already have an account? Login"}
+                  </button>
+                </div>
+              )}
+
+              {!dashboard && (
+                <button
+                  className="social-login-button google-login"
+                  onClick={() =>
+                    loginWithRedirect({
+                      authorizationParams: {
+                        connection: "google-oauth2",
+                        audience: "http://127.0.0.1:8000",
+                      },
+                    })
+                  }
+                >
+                  Continue with Google
+                </button>
+              )}
+                <button
+                  className="facebook-login-button"
+                  onClick={() =>
+                    loginWithRedirect({
+                      authorizationParams: {
+                        connection: "facebook"
+                      },
+                    })
+                  }
+                >
+                  Continue with Facebook
+                </button>
+              {dashboard && (
+                <button
+                  className="social-login-button"
+                  onClick={() => {
+                    setToken("");
+                    setDashboard(null);
+                    setNotifications([]);
+                    setAuthEmail("");
+                    setAuthPassword("");
+                    setAuthSuccess("");
+                    setError("");
+                  }}
+                >
+                  Logout
+                </button>
+              )}
+            </>
+          ) : (
+            <div>
+              <p className="auth0-login-title">
+                Logged in as {user?.email || user?.name}
+              </p>
+
+              <button
+                className="social-login-button"
+                onClick={() =>
+                  logout({
+                    logoutParams: {
+                      returnTo: window.location.origin,
+                    },
+                  })
+                }
+              >
+                Logout
+              </button>
+            </div>
+          )}
+        </div>
         <div className="header-actions">
           <div className="notification-wrapper">
             <button
@@ -536,35 +903,6 @@ function App() {
           </div>
         </div>
       </header>
-
-      <section className="token-panel">
-        <label htmlFor="token">JWT Access Token</label>
-
-        <input
-          id="token"
-          type="password"
-          placeholder="Paste your access token here"
-          value={token}
-          onChange={(event) =>
-            setToken(event.target.value)
-          }
-        />
-
-        <button
-          onClick={loadDashboard}
-          disabled={loading}
-        >
-          {loading
-            ? "Loading..."
-            : "Load My Dashboard"}
-        </button>
-
-        <p className="helper-text">
-          Use your own access token. It is only used to
-          request your authenticated dashboard and
-          notifications.
-        </p>
-      </section>
 
       {error && (
         <div className="error-message" role="alert">

@@ -9,6 +9,7 @@ from routers import auth, posts, comments, likes, subscription
 from routers import dashboard
 from routers import notifications
 from routers import ai_support
+from routers import auth0
 
 Base.metadata.create_all(bind=engine)
 
@@ -53,6 +54,7 @@ app.include_router(subscription.router)
 app.include_router(dashboard.router)
 app.include_router(notifications.router)
 app.include_router(ai_support.router)
+app.include_router(auth0.router)
 
 @app.get("/")
 def home():

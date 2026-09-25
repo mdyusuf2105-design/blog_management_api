@@ -1,22 +1,78 @@
-
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database import get_db
 from models import User, Post, Comment, Like
+
 from auth import get_current_user
+from auth0 import get_auth0_user
+
 
 router = APIRouter(
     prefix="/user",
     tags=["User Dashboard"]
 )
 
+security = HTTPBearer()
+
+
+def get_dashboard_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Accept either:
+    1. Normal application JWT
+    2. Auth0 access token
+    """
+
+    token = credentials.credentials
+
+    # -------------------------------------------------
+    # FIRST: Try the normal application JWT
+    # -------------------------------------------------
+    try:
+        current_user = get_current_user(
+            credentials=credentials,
+            db=db
+        )
+
+        if current_user:
+            return current_user
+
+    except Exception:
+        pass
+
+    # -------------------------------------------------
+    # SECOND: Try Auth0 token
+    # -------------------------------------------------
+    try:
+        current_user = get_auth0_user(
+            credentials=credentials,
+            db=db
+        )
+
+        if current_user:
+            return current_user
+
+    except Exception:
+        pass
+
+    # -------------------------------------------------
+    # BOTH FAILED
+    # -------------------------------------------------
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid authentication token"
+    )
+
 
 @router.get("/dashboard/")
 def get_user_dashboard(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_dashboard_user)
 ):
     # 1. Total posts created by the logged-in user
     total_posts = (
@@ -69,10 +125,12 @@ def get_user_dashboard(
             Post.id,
             Post.title,
             func.coalesce(
-                comment_counts.c.comments_count, 0
+                comment_counts.c.comments_count,
+                0
             ).label("comments_count"),
             func.coalesce(
-                like_counts.c.likes_count, 0
+                like_counts.c.likes_count,
+                0
             ).label("likes_count")
         )
         .outerjoin(
