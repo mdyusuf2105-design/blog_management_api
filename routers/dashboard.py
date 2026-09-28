@@ -35,7 +35,7 @@ def get_dashboard_user(
     # -------------------------------------------------
     try:
         current_user = get_current_user(
-            credentials=credentials,
+            token=token,
             db=db
         )
 

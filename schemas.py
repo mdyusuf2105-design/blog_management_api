@@ -31,6 +31,7 @@ class PostCreate(BaseModel):
     title: str
     content: str
 
+
 class PostImageResponse(BaseModel):
     id: int
     image_path: str
@@ -38,17 +39,26 @@ class PostImageResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class PostResponse(BaseModel):
     id: int
     title: str
     content: str
     author_id: int
     created_at: datetime
+
     image: str | None = None
+
     images: list[PostImageResponse] = []
+
+    # Scheduled Publishing fields
+    status: str
+    scheduled_at: datetime | None = None
+    published_at: datetime | None = None
 
     class Config:
         from_attributes = True
+
 
 class PaginatedPostResponse(BaseModel):
     posts: list[PostResponse]
@@ -56,10 +66,12 @@ class PaginatedPostResponse(BaseModel):
     total_pages: int
     page: int
     limit: int
-    
+
+
 class PostUpdate(BaseModel):
     title: str
     content: str
+
 
 class CommentCreate(BaseModel):
     text: str
@@ -74,4 +86,3 @@ class CommentResponse(BaseModel):
 
     class Config:
         from_attributes = True
-

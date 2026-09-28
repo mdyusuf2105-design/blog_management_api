@@ -1,10 +1,9 @@
-
 import os
 import shutil
 import uuid
 import math
 from pathlib import Path
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from fastapi import (
     APIRouter,
@@ -45,7 +44,11 @@ def save_image(image: UploadFile) -> str:
     extension = Path(image.filename or "").suffix.lower()
 
     allowed_extensions = {
-        ".jpg", ".jpeg", ".png", ".gif", ".webp"
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
     }
 
     if extension not in allowed_extensions:
@@ -82,12 +85,87 @@ def check_active_subscription(user: User):
         )
 
 
+def normalize_scheduled_datetime(value: datetime | None):
+    if value is None:
+        return None
+
+    # If the client sends a timezone-aware datetime, convert it to UTC.
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    return value
+
+
+def validate_publishing_options(
+    publishing_option: str,
+    scheduled_at: datetime | None,
+):
+    allowed_options = {
+        "publish_now",
+        "draft",
+        "schedule",
+    }
+
+    if publishing_option not in allowed_options:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid publishing option. Use "
+                "'publish_now', 'draft', or 'schedule'."
+            ),
+        )
+
+    if publishing_option == "draft":
+        if scheduled_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Draft posts cannot have scheduled_at set.",
+            )
+
+    if publishing_option == "schedule":
+        if scheduled_at is None:
+            raise HTTPException(
+                status_code=400,
+                detail="scheduled_at is required when scheduling a post.",
+            )
+
+        scheduled_at = normalize_scheduled_datetime(scheduled_at)
+
+        now = datetime.utcnow()
+
+        if scheduled_at <= now:
+            raise HTTPException(
+                status_code=400,
+                detail="scheduled_at must be a future datetime.",
+            )
+
+        return scheduled_at
+
+    if publishing_option == "publish_now":
+        if scheduled_at is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Publish Now cannot have scheduled_at set.",
+            )
+
+    return None
+
+
 @router.post("/", response_model=PostResponse)
 def create_post(
     title: str = Form(...),
     content: str = Form(...),
+
+    # Publishing options:
+    # publish_now / draft / schedule
+    publishing_option: str = Form("publish_now"),
+
+    # Required only when publishing_option = schedule
+    scheduled_at: datetime | None = Form(None),
+
     image1: UploadFile | None = File(None),
     image2: UploadFile | None = File(None),
+
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -117,7 +195,8 @@ def create_post(
 
     # Check image limit
     uploaded_images = [
-        image for image in (image1, image2)
+        image
+        for image in (image1, image2)
         if image is not None and image.filename
     ]
 
@@ -130,11 +209,36 @@ def create_post(
             detail=PLAN_LIMIT_MESSAGE,
         )
 
+    # Validate publishing option
+    normalized_scheduled_at = validate_publishing_options(
+        publishing_option,
+        scheduled_at,
+    )
+
+    # Determine initial status
+    if publishing_option == "draft":
+        status = "draft"
+        scheduled_value = None
+        published_value = None
+
+    elif publishing_option == "schedule":
+        status = "scheduled"
+        scheduled_value = normalized_scheduled_at
+        published_value = None
+
+    else:
+        status = "published"
+        scheduled_value = None
+        published_value = datetime.utcnow()
+
     new_post = Post(
         title=title,
         content=content,
         author_id=current_user.id,
         image=None,
+        status=status,
+        scheduled_at=scheduled_value,
+        published_at=published_value,
     )
 
     db.add(new_post)
@@ -163,9 +267,9 @@ def create_post(
     except Exception:
         db.rollback()
 
-        # Remove files saved before a database failure
         for image_url in saved_paths:
             file_path = Path(image_url.lstrip("/"))
+
             if file_path.is_file():
                 os.remove(file_path)
 
@@ -185,13 +289,19 @@ def get_posts(
 
     if search:
         search_term = f"%{search}%"
+
         query = query.filter(
             (Post.title.ilike(search_term))
             | (Post.content.ilike(search_term))
         )
 
     total_count = query.count()
-    total_pages = math.ceil(total_count / limit) if total_count > 0 else 0
+
+    total_pages = (
+        math.ceil(total_count / limit)
+        if total_count > 0
+        else 0
+    )
 
     posts = (
         query
@@ -215,9 +325,11 @@ def get_my_posts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return db.query(Post).filter(
-        Post.author_id == current_user.id
-    ).all()
+    return (
+        db.query(Post)
+        .filter(Post.author_id == current_user.id)
+        .all()
+    )
 
 
 @router.get("/{post_id}", response_model=PostResponse)
@@ -225,10 +337,17 @@ def get_post(
     post_id: int,
     db: Session = Depends(get_db),
 ):
-    post = db.query(Post).filter(Post.id == post_id).first()
+    post = (
+        db.query(Post)
+        .filter(Post.id == post_id)
+        .first()
+    )
 
     if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Post not found"
+        )
 
     return post
 
@@ -238,14 +357,26 @@ def update_post(
     post_id: int,
     title: str = Form(...),
     content: str = Form(...),
+
+    publishing_option: str = Form("publish_now"),
+    scheduled_at: datetime | None = Form(None),
+
     image: UploadFile | None = File(None),
+
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    post = db.query(Post).filter(Post.id == post_id).first()
+    post = (
+        db.query(Post)
+        .filter(Post.id == post_id)
+        .first()
+    )
 
     if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Post not found"
+        )
 
     if post.author_id != current_user.id:
         raise HTTPException(
@@ -253,12 +384,35 @@ def update_post(
             detail="You can only update your own posts",
         )
 
+    normalized_scheduled_at = validate_publishing_options(
+        publishing_option,
+        scheduled_at,
+    )
+
     post.title = title
     post.content = content
+
+    if publishing_option == "draft":
+        post.status = "draft"
+        post.scheduled_at = None
+        post.published_at = None
+
+    elif publishing_option == "schedule":
+        post.status = "scheduled"
+        post.scheduled_at = normalized_scheduled_at
+        post.published_at = None
+
+    else:
+        post.status = "published"
+        post.scheduled_at = None
+
+        if post.published_at is None:
+            post.published_at = datetime.utcnow()
 
     if image and image.filename:
         if post.image:
             old_image_path = Path(post.image.lstrip("/"))
+
             if old_image_path.is_file():
                 os.remove(old_image_path)
 
@@ -276,10 +430,17 @@ def delete_post(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    post = db.query(Post).filter(Post.id == post_id).first()
+    post = (
+        db.query(Post)
+        .filter(Post.id == post_id)
+        .first()
+    )
 
     if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Post not found"
+        )
 
     if post.author_id != current_user.id:
         raise HTTPException(
@@ -289,10 +450,13 @@ def delete_post(
 
     if post.image:
         image_path = Path(post.image.lstrip("/"))
+
         if image_path.is_file():
             os.remove(image_path)
 
     db.delete(post)
     db.commit()
 
-    return {"message": "Post deleted successfully"}
+    return {
+        "message": "Post deleted successfully"
+    }

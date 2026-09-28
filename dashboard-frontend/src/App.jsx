@@ -71,6 +71,16 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [authSuccess, setAuthSuccess] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
+    // Scheduled Blog Publishing
+  const [postTitle, setPostTitle] = useState("");
+  const [postContent, setPostContent] = useState("");
+  const [publishingOption, setPublishingOption] = useState("publish_now");
+  const [scheduledAt, setScheduledAt] = useState("");
+  const [postImage, setPostImage] = useState(null);
+  const [postImage2, setPostImage2] = useState(null);
+  const [postLoading, setPostLoading] = useState(false);
+  const [postMessage, setPostMessage] = useState("");
+  const [postError, setPostError] = useState("");
 
   // Automatically load the dashboard after a successful Auth0 login.
   useEffect(() => {
@@ -221,7 +231,122 @@ function App() {
       setAuthLoading(false);
     }
   }
+  // Create a blog post with Publish Now, Draft, or Schedule
+  async function createBlogPost() {
+    setPostError("");
+    setPostMessage("");
 
+    if (!postTitle.trim()) {
+      setPostError("Please enter a blog title.");
+      return;
+    }
+
+    if (!postContent.trim()) {
+      setPostError("Please enter blog content.");
+      return;
+    }
+
+    if (!token) {
+      setPostError("Please login first.");
+      return;
+    }
+
+    if (publishingOption === "schedule" && !scheduledAt) {
+      setPostError("Please select a future date and time.");
+      return;
+    }
+
+    let scheduledDate = null;
+
+    if (publishingOption === "schedule") {
+      scheduledDate = new Date(scheduledAt);
+
+      if (Number.isNaN(scheduledDate.getTime())) {
+        setPostError("Invalid scheduled date and time.");
+        return;
+      }
+
+      if (scheduledDate <= new Date()) {
+        setPostError("Scheduled date and time must be in the future.");
+        return;
+      }
+    }
+
+    setPostLoading(true);
+
+    try {
+      const formData = new FormData();
+
+      formData.append("title", postTitle.trim());
+      formData.append("content", postContent.trim());
+      formData.append("publishing_option", publishingOption);
+
+      if (publishingOption === "schedule") {
+        formData.append(
+          "scheduled_at",
+          scheduledDate.toISOString()
+        );
+      }
+
+      if (postImage instanceof File) {
+        formData.append("image1", postImage);
+      }
+
+      if (postImage2 instanceof File) {
+        formData.append("image2", postImage2);
+      }
+
+      const response = await fetch(`${API_URL}/posts/`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+        },
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const detail = Array.isArray(data.detail)
+          ? data.detail
+              .map((item) => item.msg || "Invalid input")
+              .join(", ")
+          : data.detail;
+
+        throw new Error(detail || "Unable to create blog post.");
+      }
+
+      if (publishingOption === "draft") {
+        setPostMessage("Blog saved as draft successfully.");
+      } else if (publishingOption === "schedule") {
+        setPostMessage(
+          `Blog scheduled successfully for ${new Date(
+            data.scheduled_at
+          ).toLocaleString()}.`
+        );
+      } else {
+        setPostMessage("Blog published successfully.");
+      }
+
+      // Clear form
+      setPostTitle("");
+      setPostContent("");
+      setPublishingOption("publish_now");
+      setScheduledAt("");
+      setPostImage(null);
+      setPostImage2("null");
+
+      // Refresh dashboard statistics
+      await loadDashboardWithToken(token);
+    } catch (err) {
+      setPostError(
+        err.message || "Unable to create blog post."
+      );
+    } finally {
+      setPostLoading(false);
+    }
+  }
 async function loadDashboardWithToken(accessToken) {
   setLoading(true);
   setError("");
@@ -925,7 +1050,257 @@ async function loadDashboardWithToken(accessToken) {
                 .toUpperCase()}
             </div>
           </section>
+                    
 
+          {/* Create Blog Post */}
+          <section
+            style={{
+              background: "#ffffff",
+              borderRadius: "16px",
+              padding: "24px",
+              marginBottom: "24px",
+              boxShadow: "0 4px 18px rgba(0, 0, 0, 0.08)",
+            }}
+          >
+            <div style={{ marginBottom: "20px" }}>
+              <p className="eyebrow">BLOG MANAGEMENT</p>
+              <h2 style={{ margin: "4px 0" }}>
+                Create Blog Post
+              </h2>
+              <p style={{ margin: 0, color: "#6b7280" }}>
+                Create, save as draft, publish immediately, or
+                schedule your blog for later.
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gap: "16px",
+              }}
+            >
+              {/* Title */}
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontWeight: "600",
+                    marginBottom: "6px",
+                  }}
+                >
+                  Title
+                </label>
+
+                <input
+                  type="text"
+                  value={postTitle}
+                  onChange={(event) =>
+                    setPostTitle(event.target.value)
+                  }
+                  placeholder="Enter blog title"
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "8px",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              {/* Content */}
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    fontWeight: "600",
+                    marginBottom: "6px",
+                  }}
+                >
+                  Content
+                </label>
+
+                <textarea
+                  value={postContent}
+                  onChange={(event) =>
+                    setPostContent(event.target.value)
+                  }
+                  placeholder="Write your blog content"
+                  rows="6"
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "8px",
+                    resize: "vertical",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              {/* Images */}
+              <div className="blog-image-row">
+                <div className="blog-image-upload">
+                  <label>
+                    Image 1
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) =>
+                      setPostImage(
+                        event.target.files?.[0] || null
+                      )
+                    }
+                  
+                  />
+                </div>
+
+                <div className="blog-image-upload">
+                  <label>
+                    Image 2
+                  </label>
+
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) =>
+                      setPostImage2(
+                        event.target.files?.[0] || null
+                      )
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* Publishing Options */}
+              <div className="blog-publishing">
+                <div className="blog-publishing-title">
+                  Publishing Option
+                </div>
+
+                <div className="blog-publishing-options">
+
+                  <div className="blog-publishing-option">
+                    <input
+                      type="radio"
+                      id="publish-now"
+                      name="publishing-option"
+                      value="publish_now"
+                      checked={publishingOption === "publish_now"}
+                      onChange={(e) => setPublishingOption(e.target.value)}
+                    />
+                    <label htmlFor="publish-now">
+                      Publish Now
+                    </label>
+                  </div>
+
+                  <div className="blog-publishing-option">
+                    <input
+                      type="radio"
+                      id="save-draft"
+                      name="publishing-option"
+                      value="draft"
+                      checked={publishingOption === "draft"}
+                      onChange={(e) => setPublishingOption(e.target.value)}
+                    />
+                    <label htmlFor="save-draft">
+                      Save as Draft
+                    </label>
+                  </div>
+
+                  <div className="blog-publishing-option">
+                    <input
+                      type="radio"
+                      id="schedule-post"
+                      name="publishing-option"
+                      value="schedule"
+                      checked={publishingOption === "schedule"}
+                      onChange={(e) => setPublishingOption(e.target.value)}
+                    />
+                    <label htmlFor="schedule-post">
+                      Schedule Post
+                    </label>
+                  </div>
+
+                </div>
+              </div>
+            
+
+              {/* Scheduled Date & Time */}
+              {publishingOption === "schedule" && (
+                <div>
+                  <label
+                    style={{
+                      display: "block",
+                      fontWeight: "600",
+                      marginBottom: "6px",
+                    }}
+                  >
+                    Scheduled Date & Time
+                  </label>
+
+                  <input
+                    type="datetime-local"
+                    value={scheduledAt}
+                    min={new Date()
+                      .toISOString()
+                      .slice(0, 16)}
+                    onChange={(event) =>
+                      setScheduledAt(event.target.value)
+                    }
+                    style={{
+                      padding: "12px",
+                      border: "1px solid #d1d5db",
+                      borderRadius: "8px",
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Messages */}
+              {postError && (
+                <p
+                  style={{
+                    color: "#dc2626",
+                    margin: 0,
+                    fontWeight: "600",
+                  }}
+                >
+                  {postError}
+                </p>
+              )}
+
+              {postMessage && (
+                <p
+                  style={{
+                    color: "#16a34a",
+                    margin: 0,
+                    fontWeight: "600",
+                  }}
+                >
+                  {postMessage}
+                </p>
+              )}
+
+              {/* Submit */}
+              <button
+                className="blog-submit-button"
+                onClick={createBlogPost}
+                disabled={postLoading}
+              >
+                {postLoading
+                  ? "Saving..."
+                  : publishingOption === "draft"
+                  ? "Save Draft"
+                  : publishingOption === "schedule"
+                  ? "Schedule Post"
+                  : "Publish Now"}
+              </button>
+            </div>
+          </section>
+
+          <section className="stats-grid"></section>
           <section className="stats-grid">
             <article className="stat-card">
               <div className="stat-icon purple">✍</div>
